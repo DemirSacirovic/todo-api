@@ -1,43 +1,71 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from database import engine,SessionLocal
+from models import Todo as TodoModel
+import models
 
+
+models.Base.metadata.create_all(bind=engine)
+
+
+def get_db():
+    db = SessionLocal()
+    try: 
+        yield db
+    finally: 
+        db.close()
 
 
 class Todo(BaseModel):
     title:str
     completed:bool
 
-todos_db = []
-todo_counter = 1
-
 
 app = FastAPI()
 
 @app.get('/todos')
-def get_all_todos():
-    return todos_db
-
+def get_all_todos(db: Session = Depends(get_db)):
+    return db.query(TodoModel).all()
 
 @app.post('/todos')
-def create_todos(todo:Todo):
-    global todo_counter
-    new_item = {'id' : todo_counter, 'title' : todo.title, 'completed' : todo.completed}
-    todos_db.append(new_item)    
-    todo_counter +=1
-    return new_item
+def create_todos(todo: Todo, db: Session = Depends(get_db)):
+    db_todo = TodoModel(
+        title=todo.title,
+        completed=todo.completed
+    )
+    db.add(db_todo)
+    db.commit()
+    db.refresh(db_todo)
+    return db_todo
 
+
+  
 @app.put('/todos/{todo_id}')
-def update_todo(todo_id : int, todo : Todo):
-    for i in range(len(todos_db)):
-        if todos_db[i]['id'] == todo_id:
-            todos_db[i] = {'id':todo_id, 'title' : todo.title, 'completed' : todo.completed}
-            return todos_db[i]
-    return {'error': 'Todo not found'}
+def update_todo(todo_id: int, todo: Todo, db: Session = Depends(get_db)):
+    db_todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
 
+    if not db_todo:
+        return {"error": "Todo not found"}
+
+    db_todo.title = todo.title
+    db_todo.completed = todo.completed
+
+    db.commit()
+    db.refresh(db_todo)
+
+    return db_todo
+
+  # DELETE - obriši todo
 @app.delete('/todos/{todo_id}')
-def delete_todo(todo_id: int):
-    for i in range(len(todos_db)):
-        if todos_db[i]['id'] == todo_id:
-            deleted = todos_db.pop(i)  # Briše i vraća
-            return {"message": "Deleted", "item": deleted}
-    return {"error": "Todo not found"}
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    db_todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+
+    if not db_todo:
+        return {"error": "Todo not found"}
+
+    db.delete(db_todo)
+    db.commit()
+
+    return {"message": "Todo deleted", "todo": db_todo}
+
