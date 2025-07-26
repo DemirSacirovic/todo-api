@@ -4,9 +4,19 @@ from sqlalchemy.orm import Session
 from database import engine,SessionLocal
 from models import Todo as TodoModel
 import models
+from models import User
+from auth import hash_password, verify_password
+from jose import jwt
+from datetime import datetime, timedelta
+
 
 
 models.Base.metadata.create_all(bind=engine)
+
+SECRET_KEY = "your-secret-key-here"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
 
 
 def get_db():
@@ -16,10 +26,28 @@ def get_db():
     finally: 
         db.close()
 
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+
 
 class Todo(BaseModel):
     title:str
     completed:bool
+
+class UserCreate(BaseModel):
+    email : str
+    username : str
+    password : str
+
+class UserLogin(BaseModel):
+    username : str
+    password : str
 
 
 app = FastAPI()
@@ -68,4 +96,49 @@ def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Todo deleted", "todo": db_todo}
+
+@app.post("/register")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+      # Proveri da li već postoji
+    db_user = db.query(User).filter(User.username == user.username).first()
+    if db_user:
+        return {"error": "Username already exists"}
+
+      # Hash-uj lozinku
+    hashed_pwd = hash_password(user.password)
+
+      # Napravi novog usera
+    new_user = User(
+        email=user.email,
+        username=user.username,
+        hashed_password=hashed_pwd
+    )
+
+      # Sačuvaj u bazu
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return {"message": "User created successfully", "username": new_user.username}
+
+@app.post("/login")
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    print(f"Login attempt for: {user.username}")
+
+    db_user = db.query(User).filter(User.username == user.username).first()
+
+    if not db_user:
+        print("User not found in database")
+        return {"error": "Invalid credentials"}
+
+    print(f"User found: {db_user.username}")
+    print(f"Checking password...")
+    password_ok = verify_password(user.password, db_user.hashed_password)
+    print(f"Password valid: {password_ok}")
+
+    if not password_ok:
+        return {"error": "Invalid credentials"}
+
+    access_token = create_access_token(data={"sub": db_user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
 
