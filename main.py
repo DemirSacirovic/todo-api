@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends
+from fastapi.security import OAuth2PasswordBearer
+from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import engine,SessionLocal
@@ -33,8 +34,22 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+     credentials_exception = HTTPException(
+         status_code=status.HTTP_401_UNAUTHORIZED,
+         detail="Could not validate credentials",
+         headers={"WWW-Authenticate": "Bearer"},
+     )
+     try:
+         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+         username: str = payload.get("sub")
+         if username is None:
+             raise credentials_exception
+     except:
+         raise credentials_exception
+     return username
 
 class Todo(BaseModel):
     title:str
@@ -51,6 +66,16 @@ class UserLogin(BaseModel):
 
 
 app = FastAPI()
+
+@app.get("/users/me")
+def read_users_me(current_user: str = Depends(get_current_user)):
+    if not current_user:
+        return {"error": "Not authenticated"}
+    return {"username": current_user}
+
+
+
+
 
 @app.get('/todos')
 def get_all_todos(db: Session = Depends(get_db)):
@@ -84,7 +109,6 @@ def update_todo(todo_id: int, todo: Todo, db: Session = Depends(get_db)):
 
     return db_todo
 
-  # DELETE - obriši todo
 @app.delete('/todos/{todo_id}')
 def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     db_todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
@@ -99,22 +123,18 @@ def delete_todo(todo_id: int, db: Session = Depends(get_db)):
 
 @app.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
-      # Proveri da li već postoji
     db_user = db.query(User).filter(User.username == user.username).first()
     if db_user:
         return {"error": "Username already exists"}
 
-      # Hash-uj lozinku
     hashed_pwd = hash_password(user.password)
 
-      # Napravi novog usera
     new_user = User(
         email=user.email,
         username=user.username,
         hashed_password=hashed_pwd
     )
 
-      # Sačuvaj u bazu
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
