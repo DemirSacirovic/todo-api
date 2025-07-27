@@ -75,11 +75,19 @@ def read_users_me(current_user: str = Depends(get_current_user)):
 
 
 
-
-
 @app.get('/todos')
-def get_all_todos(db: Session = Depends(get_db)):
-    return db.query(TodoModel).all()
+async def get_all_todos(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Nađi user objekat
+    user = db.query(User).filter(User.username == current_user).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Vrati samo njegove todos
+    return db.query(TodoModel).filter(TodoModel.user_id == user.id).all()
+
 
 @app.post('/todos')
 def create_todos(todo: Todo, db: Session = Depends(get_db)):
@@ -95,27 +103,31 @@ def create_todos(todo: Todo, db: Session = Depends(get_db)):
 
   
 @app.put('/todos/{todo_id}')
-def update_todo(todo_id: int, todo: Todo, db: Session = Depends(get_db)):
-    db_todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+async def update_todo(todo_id: int, todo: Todo, current_user: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == current_user).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    if not db_todo:
-        return {"error": "Todo not found"}
-
-    db_todo.title = todo.title
-    db_todo.completed = todo.completed
-
-    db.commit()
-    db.refresh(db_todo)
-
-    return db_todo
+    db_todo = db.query(TodoModel).filter(
+    TodoModel.id == todo_id,        # Da li postoji taj todo?
+    TodoModel.user_id == user.id    # Da li pripada ovom korisniku?
+    ).first()
 
 @app.delete('/todos/{todo_id}')
-def delete_todo(todo_id: int, db: Session = Depends(get_db)):
-    db_todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+async def delete_todo(todo_id: int, current_user: str = Depends(get_current_user),  # DODATO
+    db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == current_user).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+   
+    db_todo = db.query(TodoModel).filter(
+    TodoModel.id == todo_id,
+    TodoModel.user_id == user.id  # PROVERA VLASNIŠTVA
+    ).first()
 
     if not db_todo:
-        return {"error": "Todo not found"}
-
+        raise HTTPException(status_code=404, detail="Todo not found or access denied")
+    
     db.delete(db_todo)
     db.commit()
 
