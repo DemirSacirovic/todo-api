@@ -112,6 +112,24 @@ async def update_todo(todo_id: int, todo: Todo, current_user: str = Depends(get_
     TodoModel.id == todo_id,        # Da li postoji taj todo?
     TodoModel.user_id == user.id    # Da li pripada ovom korisniku?
     ).first()
+     
+    if not db_todo:
+        raise HTTPException(status_code=404, detail="Todo not found or access denied")
+
+    db_todo.title = todo.title
+    db_todo.completed = todo.completed
+
+    db.commit()
+    db.refresh(db_todo)
+
+    return db_todo
+
+
+
+
+
+
+
 
 @app.delete('/todos/{todo_id}')
 async def delete_todo(todo_id: int, current_user: str = Depends(get_current_user),  # DODATO
@@ -173,4 +191,5 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 
     access_token = create_access_token(data={"sub": db_user.username})
     return {"access_token": access_token, "token_type": "bearer"}
+
 
